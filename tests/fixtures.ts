@@ -40,3 +40,50 @@ export const fixtureHtml = `<!doctype html>
     <a href="/us/en-US/search/911?page=2">Next Page</a>
   </body>
 </html>`;
+
+export const fixtureDetailVisibleText = [
+  "2022 Porsche 911 Carrera 4S Coupe",
+  "Certified Pre-Owned",
+  "$129,900",
+  "Porsche San Antonio",
+  "Stock Number:",
+  "NS123456",
+  "VIN:",
+  "WP0AB2A99NS123456",
+  "Vehicle Equipment",
+  "Equipment Highlights",
+  "BOSE Surround Sound System Sport Chrono Package Front Axle Lift System ParkAssist incl. Surround View LED Headlights Sports Seats",
+  "Included Options",
+  "Packages",
+  "Premium Package Plus i.c.w. Adaptive Sport Seats Plus (18-way)",
+  "Sport Package",
+  "Exterior",
+  "Electric Slide/Tilt Sunroof in Glass",
+  "SportDesign Exterior Mirrors",
+  "Transmission / Chassis",
+  "Sport Chrono Package",
+  "Front Axle Lift System",
+  "Interior",
+  "GT Sport Steering Wheel",
+  "Power Sport Seats (14-way) with Memory Package",
+  "Seat Ventilation (Front)",
+  "Interior Leather",
+  "Interior Trim in Leather",
+  "Audio / Communication",
+  "BOSE Surround Sound System",
+  "Comfort Assistance",
+  "Surround View",
+  "Standard Equipment",
+  "Cruise Control",
+  "Standard Sound Package"
+].join("\n");
+
+export const fixtureDetailHtml = `<!doctype html>
+<html>
+  <body>
+    ${fixtureDetailVisibleText
+      .split("\n")
+      .map((line) => `<p>${line}</p>`)
+      .join("\n")}
+  </body>
+</html>`;

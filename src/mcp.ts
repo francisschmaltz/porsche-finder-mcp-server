@@ -5,9 +5,9 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import type { SearchStore } from "./db.js";
 import type { PorscheSearchService } from "./porsche/search.js";
-import { formatSearchRun } from "./porsche/format.js";
+import { formatAddedFeatures, formatSearchRun } from "./porsche/format.js";
 import { buildPorscheSearchUrl, buildSearchSummary } from "./porsche/url.js";
-import { mcpSearchInputSchema } from "./validation.js";
+import { carAddedFeaturesInputSchema, inventoryChangesInputSchema, mcpSearchInputSchema } from "./validation.js";
 import { toToolName } from "./slug.js";
 
 type McpSession = {
@@ -169,6 +169,73 @@ export function createPorscheMcpServer(store: SearchStore, searchService: Porsch
       return {
         content: [{ type: "text", text }]
       };
+    }
+  );
+
+  server.registerTool(
+    "list_porsche_inventory_changes",
+    {
+      title: "List Porsche inventory changes",
+      description: "Show recent Porsche Finder cached price changes and search-specific removals.",
+      inputSchema: inventoryChangesInputSchema
+    },
+    async ({ limit }) => {
+      return {
+        content: [{ type: "text", text: searchService.listInventoryChanges(limit) }]
+      };
+    }
+  );
+
+  server.registerTool(
+    "get_porsche_car_added_features",
+    {
+      title: "Get Porsche car added features",
+      description: "Show cached added/non-standard features for one Porsche Finder car by cache ID, VIN, stock number, or detail URL.",
+      inputSchema: carAddedFeaturesInputSchema
+    },
+    async ({ carId, vin, stockNumber, detailUrl, refresh }) => {
+      if (!carId && !vin && !stockNumber && !detailUrl) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: "Provide one of carId, vin, stockNumber, or detailUrl." }]
+        };
+      }
+
+      try {
+        const matches = await searchService.getCarAddedFeatures({ carId, vin, stockNumber, detailUrl, refresh });
+        if (matches.length === 0) {
+          return {
+            content: [{ type: "text", text: "No cached Porsche car matched that identifier." }]
+          };
+        }
+
+        if (matches.length > 1) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: [
+                  "Multiple cached cars matched. Use carId to choose one.",
+                  ...matches.map((car) => {
+                    return `${car.id}: ${car.title} ${car.vin ? `VIN ${car.vin}` : ""} ${
+                      car.stockNumber ? `stock ${car.stockNumber}` : ""
+                    } ${car.link}`;
+                  })
+                ].join("\n")
+              }
+            ]
+          };
+        }
+
+        return {
+          content: [{ type: "text", text: formatAddedFeatures(matches[0]) }]
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: error instanceof Error ? error.message : "Added-feature lookup failed." }]
+        };
+      }
     }
   );
 

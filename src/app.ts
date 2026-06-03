@@ -31,7 +31,7 @@ export function createApp(config: AppConfig, options: CreateAppOptions = {}): Ap
   const app = createMcpExpressApp({ host: config.host });
   const store = new SearchStore(config.databasePath);
   const fetcher = options.fetcher ?? new HybridPorscheFetcher(config);
-  const searchService = new PorscheSearchService(fetcher, config.cacheTtlMs);
+  const searchService = new PorscheSearchService(fetcher, store, config.cacheTtlMs);
   const mcpSessions = new PorscheMcpSessionManager(store, searchService);
   const requireAuth = requireBearerAuth(config.authToken);
 

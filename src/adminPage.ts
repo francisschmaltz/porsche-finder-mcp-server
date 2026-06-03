@@ -222,6 +222,13 @@ export function renderAdminPage(): string {
       gap: 10px;
     }
 
+    .slug-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: start;
+    }
+
     .inline {
       display: flex;
       align-items: center;
@@ -257,6 +264,14 @@ export function renderAdminPage(): string {
     .muted {
       color: var(--muted);
       font-size: 12px;
+    }
+
+    .hint {
+      margin-top: 5px;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      overflow-wrap: anywhere;
     }
 
     @media (max-width: 980px) {
@@ -307,8 +322,12 @@ export function renderAdminPage(): string {
         <label for="name">Name</label>
         <input id="name" type="text" placeholder="Carrera S coupes under sanity">
 
-        <label for="slug">Slug</label>
-        <input id="slug" type="text" placeholder="Auto-generated from name">
+        <label for="slug">MCP tool slug</label>
+        <div class="slug-row">
+          <input id="slug" type="text" autocomplete="off" spellcheck="false" placeholder="carrera_s_coupes">
+          <button id="slug-from-name" type="button">Use name</button>
+        </div>
+        <div id="tool-name-preview" class="hint">MCP tool: porsche_911_...</div>
 
         <label for="description">Description</label>
         <textarea id="description" placeholder="What this tool should search for."></textarea>
@@ -384,6 +403,8 @@ export function renderAdminPage(): string {
       id: document.querySelector("#search-id"),
       name: document.querySelector("#name"),
       slug: document.querySelector("#slug"),
+      slugFromName: document.querySelector("#slug-from-name"),
+      toolNamePreview: document.querySelector("#tool-name-preview"),
       description: document.querySelector("#description"),
       defaultLimit: document.querySelector("#defaultLimit"),
       maxPages: document.querySelector("#maxPages"),
@@ -437,6 +458,15 @@ export function renderAdminPage(): string {
         defaultLimit: Number(els.defaultLimit.value || 10),
         maxPages: Number(els.maxPages.value || 1)
       };
+    }
+
+    function slugify(value) {
+      return value
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "")
+        .slice(0, 48);
     }
 
     function checkedValues(id) {
@@ -510,6 +540,14 @@ export function renderAdminPage(): string {
       form.equipment.forEach((value) => parts.push(formatQueryParam("equipment", value)));
       parts.push(formatQueryParam("maximum-mileage", String(form.maximumMileage)));
       els.generatedUrl.textContent = "https://finder.porsche.com/us/en-US/search/911?" + parts.join("&");
+      updateToolNamePreview();
+    }
+
+    function updateToolNamePreview() {
+      const slug = slugify(els.slug.value || els.name.value);
+      els.toolNamePreview.textContent = slug.length >= 2
+        ? "MCP tool: porsche_911_" + slug
+        : "MCP tool: enter a slug, or use the name";
     }
 
     function formatQueryParam(key, value, rawValue = false) {
@@ -580,6 +618,15 @@ export function renderAdminPage(): string {
     document.querySelector("#save-search").addEventListener("click", () => saveSearch().catch(showError));
     document.querySelector("#preview-search").addEventListener("click", () => previewSearch().catch(showError));
     document.querySelector("#delete-search").addEventListener("click", () => deleteSearch().catch(showError));
+    els.slugFromName.addEventListener("click", () => {
+      els.slug.value = slugify(els.name.value);
+      updateGeneratedUrl();
+      els.slug.focus();
+    });
+    els.slug.addEventListener("blur", () => {
+      els.slug.value = slugify(els.slug.value);
+      updateGeneratedUrl();
+    });
     ["name", "slug", "description", "defaultLimit", "maxPages", "maximumMileage"].forEach((id) => {
       document.querySelector("#" + id).addEventListener("input", updateGeneratedUrl);
     });

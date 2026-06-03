@@ -71,6 +71,8 @@ describe("MCP endpoint", () => {
 
       const toolNames = listed.body.result.tools.map((tool: { name: string }) => tool.name);
       expect(toolNames).toContain("list_porsche_search_tools");
+      expect(toolNames).toContain("get_porsche_car_added_features");
+      expect(toolNames).toContain("list_porsche_inventory_changes");
       expect(toolNames).toContain("porsche_911_carrera_coupes");
 
       const called = await request(handle.app)
@@ -93,7 +95,46 @@ describe("MCP endpoint", () => {
         .expect(200);
 
       expect(called.body.result.content[0].text).toContain("2022 Porsche 911 Carrera 4S Coupe");
+      expect(called.body.result.content[0].text).toContain("VIN: WP0AB2A99NS123456");
+      expect(called.body.result.content[0].text).toContain("GT Sport Steering Wheel");
       expect(called.body.result.content[0].text).toContain("Link: https://finder.porsche.com");
+
+      const features = await request(handle.app)
+        .post("/mcp/v1")
+        .set(mcpHeaders)
+        .set("mcp-session-id", sessionId)
+        .send({
+          jsonrpc: "2.0",
+          id: 4,
+          method: "tools/call",
+          params: {
+            name: "get_porsche_car_added_features",
+            arguments: {
+              vin: "WP0AB2A99NS123456"
+            }
+          }
+        })
+        .expect(200);
+
+      expect(features.body.result.content[0].text).toContain("Feature summary:");
+      expect(features.body.result.content[0].text).toContain("BOSE Surround Sound System");
+      expect(features.body.result.content[0].text).not.toContain("Standard Sound Package");
+
+      const changes = await request(handle.app)
+        .post("/mcp/v1")
+        .set(mcpHeaders)
+        .set("mcp-session-id", sessionId)
+        .send({
+          jsonrpc: "2.0",
+          id: 5,
+          method: "tools/call",
+          params: {
+            name: "list_porsche_inventory_changes",
+            arguments: {}
+          }
+        })
+        .expect(200);
+      expect(changes.body.result.content[0].text).toContain("Recent price history");
     } finally {
       await handle.close();
     }

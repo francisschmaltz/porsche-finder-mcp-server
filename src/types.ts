@@ -46,6 +46,55 @@ export type CarListing = {
   link: string;
 };
 
+export type FeatureMatch = {
+  key: string;
+  label: string;
+  matchedLines: string[];
+};
+
+export type CarDetailData = {
+  detailUrl: string;
+  vin?: string;
+  stockNumber?: string;
+  equipmentHighlights: string[];
+  includedOptions: string[];
+  featureMatches: FeatureMatch[];
+  fetchedAt: string;
+};
+
+export type PriceChange = {
+  previousPrice: string;
+  currentPrice: string;
+  delta: string;
+  direction: "increase" | "decrease";
+};
+
+export type CachedCar = {
+  id: number;
+  identityKey: string;
+  vin?: string;
+  stockNumber?: string;
+  title: string;
+  color: ColorPair;
+  mileage: string;
+  price: string;
+  priceCents?: number;
+  location: string;
+  link: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  status: "active" | "sold" | "unavailable";
+  details?: CarDetailData;
+  priceChange?: PriceChange;
+  detailError?: string;
+};
+
+export type RemovedSearchCar = {
+  car: CachedCar;
+  removedAt: string;
+  lastSeenAt: string;
+};
+
 export type ParsedPorschePage = {
   listings: CarListing[];
   nextPageUrl?: string;
@@ -68,7 +117,8 @@ export type SearchRunOptions = {
 
 export type SearchRunResult = {
   search: SavedSearch;
-  listings: CarListing[];
+  listings: CachedCar[];
+  removedListings: RemovedSearchCar[];
   pagesFetched: number;
   sources: FetchSource[];
   fetchedAt: string;

@@ -58,6 +58,18 @@ export const mcpSearchInputSchema = {
   refresh: z.boolean().optional().describe("Bypass the short in-memory cache.")
 };
 
+export const inventoryChangesInputSchema = {
+  limit: z.number().int().min(1).max(100).optional().describe("Maximum changes to return.")
+};
+
+export const carAddedFeaturesInputSchema = {
+  carId: z.number().int().positive().optional().describe("Cached car ID."),
+  vin: z.string().trim().min(3).optional().describe("Vehicle VIN."),
+  stockNumber: z.string().trim().min(2).optional().describe("Dealer stock number."),
+  detailUrl: z.string().trim().url().optional().describe("Porsche Finder detail URL."),
+  refresh: z.boolean().optional().describe("Force a one-time detail page refresh.")
+};
+
 export const idParamSchema = z.object({
   id: z.coerce.number().int().positive()
 });

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { AppConfig } from "../src/config.js";
 import type { FetchPageResult } from "../src/types.js";
 import type { PorschePageFetcher } from "../src/porsche/fetcher.js";
-import { fixtureHtml, fixtureVisibleText } from "./fixtures.js";
+import { fixtureDetailHtml, fixtureDetailVisibleText, fixtureHtml, fixtureVisibleText } from "./fixtures.js";
 
 export function testConfig(databasePath?: string): AppConfig {
   const dir = mkdtempSync(join(tmpdir(), "porsche-finder-mcp-"));
@@ -25,6 +25,15 @@ export class FakeFetcher implements PorschePageFetcher {
 
   async fetchPage(url: string): Promise<FetchPageResult> {
     this.calls.push(url);
+    if (url.includes("/details/")) {
+      return {
+        url,
+        html: fixtureDetailHtml,
+        visibleText: fixtureDetailVisibleText,
+        source: "http"
+      };
+    }
+
     return {
       url,
       html: fixtureHtml,
