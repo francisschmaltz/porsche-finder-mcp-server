@@ -14,6 +14,7 @@ export function testConfig(databasePath?: string): AppConfig {
     authToken: "test-token",
     databasePath: databasePath ?? join(dir, "test.sqlite"),
     cacheTtlMs: 300_000,
+    playwrightBrowser: "webkit",
     playwrightProfileDir: join(dir, "profile"),
     playwrightHeadless: true,
     playwrightChallengeTimeoutMs: 1_000

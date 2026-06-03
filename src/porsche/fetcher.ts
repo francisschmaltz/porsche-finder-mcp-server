@@ -1,11 +1,13 @@
 import { existsSync, mkdirSync } from "node:fs";
-import { chromium, type Page } from "playwright";
+import { chromium, webkit, type Page } from "playwright";
 import type { AppConfig } from "../config.js";
 import type { FetchPageResult } from "../types.js";
 import { htmlToVisibleText } from "./parser.js";
 
-const USER_AGENT =
+const CHROMIUM_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36";
+const WEBKIT_USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15";
 
 export interface PorschePageFetcher {
   fetchPage(url: string, options?: { refresh?: boolean }): Promise<FetchPageResult>;
@@ -22,7 +24,11 @@ export class HybridPorscheFetcher implements PorschePageFetcher {
   constructor(
     private config: Pick<
       AppConfig,
-      "playwrightProfileDir" | "playwrightExecutablePath" | "playwrightHeadless" | "playwrightChallengeTimeoutMs"
+      | "playwrightBrowser"
+      | "playwrightProfileDir"
+      | "playwrightExecutablePath"
+      | "playwrightHeadless"
+      | "playwrightChallengeTimeoutMs"
     >
   ) {}
 
@@ -43,7 +49,7 @@ export class HybridPorscheFetcher implements PorschePageFetcher {
       headers: {
         "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "accept-language": "en-US,en;q=0.9",
-        "user-agent": USER_AGENT
+        "user-agent": userAgentFor(this.config.playwrightBrowser)
       },
       signal: AbortSignal.timeout(30_000)
     });
@@ -63,17 +69,18 @@ export class HybridPorscheFetcher implements PorschePageFetcher {
 
   private async fetchWithPlaywright(url: string): Promise<FetchPageResult> {
     mkdirSync(this.config.playwrightProfileDir, { recursive: true });
-    const executablePath = resolveBrowserExecutable(this.config.playwrightExecutablePath);
+    const executablePath = resolveBrowserExecutable(this.config.playwrightBrowser, this.config.playwrightExecutablePath);
+    const browserType = this.config.playwrightBrowser === "webkit" ? webkit : chromium;
 
-    const context = await chromium
+    const context = await browserType
       .launchPersistentContext(this.config.playwrightProfileDir, {
         executablePath,
         headless: this.config.playwrightHeadless,
-        userAgent: USER_AGENT,
+        userAgent: userAgentFor(this.config.playwrightBrowser),
         viewport: { width: 1440, height: 1000 }
       })
       .catch((error: unknown) => {
-        throw new PorscheFetchError(buildBrowserLaunchError(error));
+        throw new PorscheFetchError(buildBrowserLaunchError(this.config.playwrightBrowser, error));
       });
 
     try {
@@ -133,7 +140,15 @@ function isChallengeError(error: unknown): boolean {
   return error instanceof PorscheFetchError && /blocked|failed/i.test(error.message);
 }
 
-function resolveBrowserExecutable(explicitPath?: string): string | undefined {
+function userAgentFor(browser: AppConfig["playwrightBrowser"]): string {
+  return browser === "webkit" ? WEBKIT_USER_AGENT : CHROMIUM_USER_AGENT;
+}
+
+function resolveBrowserExecutable(browser: AppConfig["playwrightBrowser"], explicitPath?: string): string | undefined {
+  if (browser === "webkit") {
+    return undefined;
+  }
+
   if (explicitPath) {
     return explicitPath;
   }
@@ -147,11 +162,16 @@ function resolveBrowserExecutable(explicitPath?: string): string | undefined {
   return localCandidates.find((candidate) => existsSync(candidate));
 }
 
-function buildBrowserLaunchError(error: unknown): string {
+function buildBrowserLaunchError(browser: AppConfig["playwrightBrowser"], error: unknown): string {
   const detail = error instanceof Error ? error.message : String(error);
+  const browserAdvice =
+    browser === "webkit"
+      ? "Playwright WebKit is Safari-like, not your installed Safari. Install it with `npx playwright install webkit`, or switch back to Chromium."
+      : "Use local Chrome by setting PLAYWRIGHT_EXECUTABLE_PATH, or install Playwright's browser with `npx playwright install chromium`.";
+
   return [
     "Porsche Finder blocked the direct HTTP request, and the browser fallback could not start.",
-    "Use local Chrome by setting PLAYWRIGHT_EXECUTABLE_PATH, or install Playwright's browser with `npx playwright install chromium`.",
+    browserAdvice,
     `Launch error: ${detail.split("\n")[0]}`
   ].join(" ");
 }

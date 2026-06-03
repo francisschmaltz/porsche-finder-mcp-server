@@ -516,8 +516,9 @@ export function renderAdminPage(): string {
         const active = search.id === state.activeId ? " active" : "";
         const enabled = search.enabled ? "enabled" : "disabled";
         return '<button class="saved-search' + active + '" data-id="' + search.id + '">' +
-          '<strong>' + search.name + '</strong>' +
-          '<span>' + search.toolName + " · " + enabled + '</span>' +
+          '<strong>' + escapeHtml(search.slug) + '</strong>' +
+          '<span>' + escapeHtml(search.name) + " · " + enabled + '</span>' +
+          '<span>' + escapeHtml(search.toolName) + '</span>' +
           '</button>';
       }).join("");
 
@@ -526,6 +527,18 @@ export function renderAdminPage(): string {
           const search = state.searches.find((item) => item.id === Number(button.dataset.id));
           setForm(search);
         });
+      });
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, (char) => {
+        return {
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#39;"
+        }[char];
       });
     }
 
