@@ -62,11 +62,26 @@ export const inventoryChangesInputSchema = {
   limit: z.number().int().min(1).max(100).optional().describe("Maximum changes to return.")
 };
 
-export const carAddedFeaturesInputSchema = {
+const carLocatorShape = {
   carId: z.number().int().positive().optional().describe("Cached car ID."),
   vin: z.string().trim().min(3).optional().describe("Vehicle VIN."),
   stockNumber: z.string().trim().min(2).optional().describe("Dealer stock number."),
-  detailUrl: z.string().trim().url().optional().describe("Porsche Finder detail URL."),
+  detailUrl: z.string().trim().url().optional().describe("Porsche Finder detail URL.")
+};
+
+export const carLocatorInputSchema = carLocatorShape;
+
+export const carLocatorSchema = z.object(carLocatorShape).refine(
+  (value) => {
+    return [value.carId, value.vin, value.stockNumber, value.detailUrl].filter((item) => item !== undefined).length === 1;
+  },
+  {
+    message: "Provide exactly one of carId, vin, stockNumber, or detailUrl."
+  }
+);
+
+export const carAddedFeaturesInputSchema = {
+  ...carLocatorShape,
   refresh: z.boolean().optional().describe("Force a one-time detail page refresh.")
 };
 

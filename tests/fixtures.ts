@@ -87,3 +87,23 @@ export const fixtureDetailHtml = `<!doctype html>
       .join("\n")}
   </body>
 </html>`;
+
+export const fixtureUnavailableDetailVisibleText = [
+  "2022 Porsche 911 Carrera 4S Coupe",
+  "This vehicle is no longer available",
+  "Porsche San Antonio",
+  "Stock Number:",
+  "NS123456",
+  "VIN:",
+  "WP0AB2A99NS123456"
+].join("\n");
+
+export const fixtureUnavailableDetailHtml = `<!doctype html>
+<html>
+  <body>
+    ${fixtureUnavailableDetailVisibleText
+      .split("\n")
+      .map((line) => `<p>${line}</p>`)
+      .join("\n")}
+  </body>
+</html>`;

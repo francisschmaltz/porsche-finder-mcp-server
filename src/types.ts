@@ -56,10 +56,21 @@ export type CarDetailData = {
   detailUrl: string;
   vin?: string;
   stockNumber?: string;
+  status: CarAvailabilityStatus;
+  price?: string;
   equipmentHighlights: string[];
   includedOptions: string[];
   featureMatches: FeatureMatch[];
   fetchedAt: string;
+};
+
+export type CarAvailabilityStatus = "active" | "unavailable";
+
+export type CarStatusData = {
+  detailUrl: string;
+  status: CarAvailabilityStatus;
+  price?: string;
+  checkedAt: string;
 };
 
 export type PriceChange = {
@@ -83,7 +94,11 @@ export type CachedCar = {
   link: string;
   firstSeenAt: string;
   lastSeenAt: string;
-  status: "active" | "sold" | "unavailable";
+  status: CarAvailabilityStatus;
+  isFavorite: boolean;
+  favoritedAt?: string;
+  unavailableAt?: string;
+  statusCheckedAt?: string;
   details?: CarDetailData;
   priceChange?: PriceChange;
   detailError?: string;
@@ -113,6 +128,7 @@ export type SearchRunOptions = {
   limit?: number;
   pages?: number;
   refresh?: boolean;
+  runType?: SearchRunType;
 };
 
 export type SearchRunResult = {
@@ -121,6 +137,55 @@ export type SearchRunResult = {
   removedListings: RemovedSearchCar[];
   pagesFetched: number;
   sources: FetchSource[];
+  cacheHits: number;
+  cacheMisses: number;
+  httpPulls: number;
+  playwrightPulls: number;
   fetchedAt: string;
   url: string;
+};
+
+export type SearchRunType = "saved_search" | "preview";
+
+export type SearchRunHistory = {
+  id: number;
+  runType: SearchRunType;
+  searchId?: number;
+  searchName: string;
+  searchSlug: string;
+  startedAt: string;
+  finishedAt: string;
+  success: boolean;
+  durationMs: number;
+  pagesFetched: number;
+  listingsCount: number;
+  removedCount: number;
+  sources: FetchSource[];
+  cacheHits: number;
+  cacheMisses: number;
+  httpPulls: number;
+  playwrightPulls: number;
+  error?: string;
+};
+
+export type OverviewStats = {
+  savedSearches: number;
+  enabledSearches: number;
+  cachedCars: number;
+  favoriteCars: number;
+  unavailableCars: number;
+  unavailableFavorites: number;
+  totalRuns: number;
+  failedRuns: number;
+  cacheHits: number;
+  cacheMisses: number;
+  httpPulls: number;
+  playwrightPulls: number;
+  lastRunAt?: string;
+};
+
+export type OverviewData = {
+  stats: OverviewStats;
+  recentRuns: SearchRunHistory[];
+  favoritesPreview: CachedCar[];
 };

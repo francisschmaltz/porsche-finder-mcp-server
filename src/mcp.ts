@@ -5,9 +5,14 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import type { SearchStore } from "./db.js";
 import type { PorscheSearchService } from "./porsche/search.js";
-import { formatAddedFeatures, formatSearchRun } from "./porsche/format.js";
+import { formatAddedFeatures, formatFavorites, formatSearchRun } from "./porsche/format.js";
 import { buildPorscheSearchUrl, buildSearchSummary } from "./porsche/url.js";
-import { carAddedFeaturesInputSchema, inventoryChangesInputSchema, mcpSearchInputSchema } from "./validation.js";
+import {
+  carAddedFeaturesInputSchema,
+  carLocatorInputSchema,
+  inventoryChangesInputSchema,
+  mcpSearchInputSchema
+} from "./validation.js";
 import { toToolName } from "./slug.js";
 
 type McpSession = {
@@ -239,6 +244,59 @@ export function createPorscheMcpServer(store: SearchStore, searchService: Porsch
     }
   );
 
+  server.registerTool(
+    "favorite_car",
+    {
+      title: "Favorite car",
+      description: "Favorite one cached car by cache ID, VIN, stock number, or detail URL.",
+      inputSchema: carLocatorInputSchema
+    },
+    async (locator) => {
+      if (!hasExactlyOneLocator(locator)) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: "Provide exactly one of carId, vin, stockNumber, or detailUrl." }]
+        };
+      }
+
+      const matches = await searchService.favoriteCar(locator);
+      return formatLocatorToolResult(matches, "No cached car matched that identifier. Run a search first, then favorite it.", "Favorited");
+    }
+  );
+
+  server.registerTool(
+    "unfavorite_car",
+    {
+      title: "Unfavorite car",
+      description: "Remove one cached car from favorites by cache ID, VIN, stock number, or detail URL.",
+      inputSchema: carLocatorInputSchema
+    },
+    async (locator) => {
+      if (!hasExactlyOneLocator(locator)) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: "Provide exactly one of carId, vin, stockNumber, or detailUrl." }]
+        };
+      }
+
+      const matches = await searchService.unfavoriteCar(locator);
+      return formatLocatorToolResult(matches, "No cached car matched that identifier. Run a search first, then unfavorite it.", "Unfavorited");
+    }
+  );
+
+  server.registerTool(
+    "list_favorites",
+    {
+      title: "List favorite cars",
+      description: "List cached favorite cars, including unavailable favorites."
+    },
+    async () => {
+      return {
+        content: [{ type: "text", text: formatFavorites(searchService.listFavorites()) }]
+      };
+    }
+  );
+
   for (const search of store.listEnabled()) {
     server.registerTool(
       toToolName(search.slug),
@@ -269,6 +327,45 @@ export function createPorscheMcpServer(store: SearchStore, searchService: Porsch
   }
 
   return server;
+}
+
+function hasExactlyOneLocator(locator: {
+  carId?: number;
+  vin?: string;
+  stockNumber?: string;
+  detailUrl?: string;
+}): boolean {
+  return [locator.carId, locator.vin, locator.stockNumber, locator.detailUrl].filter((value) => value !== undefined).length === 1;
+}
+
+function formatLocatorToolResult(cars: ReturnType<PorscheSearchService["listFavorites"]>, noMatchText: string, action: string) {
+  if (cars.length === 0) {
+    return {
+      content: [{ type: "text" as const, text: noMatchText }]
+    };
+  }
+
+  if (cars.length > 1) {
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: [
+            "Multiple cached cars matched. Use carId to choose one.",
+            ...cars.map((car) => {
+              return `${car.id}: ${car.title} ${car.vin ? `VIN ${car.vin}` : ""} ${
+                car.stockNumber ? `stock ${car.stockNumber}` : ""
+              } ${car.link}`;
+            })
+          ].join("\n")
+        }
+      ]
+    };
+  }
+
+  return {
+    content: [{ type: "text" as const, text: `${action}: ${cars[0].title}\n\n${formatFavorites(cars)}` }]
+  };
 }
 
 function readSessionId(req: Request): string | undefined {

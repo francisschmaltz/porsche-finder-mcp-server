@@ -28,6 +28,8 @@ Use the numbered menu to enter the token, connect, list tools, and call tools by
 
 ## Notes
 
+Search result pages are cached for 15 minutes by default with `CACHE_TTL_SECONDS=900`. Car feature/details data is cached after the first detail fetch. Price and availability refresh separately after 24 hours with `CAR_STATUS_CACHE_TTL_SECONDS=86400`.
+
 The fetcher tries HTTP first, then uses a persistent Playwright profile if Porsche Finder blocks direct requests. WebKit is the default because it avoids a Google browser while staying close to Safari.
 
 For WebKit setup:

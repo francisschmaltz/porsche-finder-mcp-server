@@ -4,7 +4,12 @@ import { PorscheSearchService } from "../src/porsche/search.js";
 import type { AppConfig } from "../src/config.js";
 import type { FetchPageResult } from "../src/types.js";
 import type { PorschePageFetcher } from "../src/porsche/fetcher.js";
-import { fixtureDetailHtml, fixtureDetailVisibleText } from "./fixtures.js";
+import {
+  fixtureDetailHtml,
+  fixtureDetailVisibleText,
+  fixtureUnavailableDetailHtml,
+  fixtureUnavailableDetailVisibleText
+} from "./fixtures.js";
 import { testConfig } from "./helpers.js";
 
 const detailUrl = "https://finder.porsche.com/us/en-US/details/porsche-911-carrera-4s-coupe-used-123";
@@ -12,6 +17,8 @@ const detailUrl = "https://finder.porsche.com/us/en-US/details/porsche-911-carre
 class InventoryFakeFetcher implements PorschePageFetcher {
   searchAHtml = listingPage("$129,900");
   searchBHtml = listingPage("$129,900");
+  detailHtml = fixtureDetailHtml;
+  detailVisibleText = fixtureDetailVisibleText;
   detailCalls = 0;
 
   async fetchPage(url: string): Promise<FetchPageResult> {
@@ -19,8 +26,8 @@ class InventoryFakeFetcher implements PorschePageFetcher {
       this.detailCalls += 1;
       return {
         url,
-        html: fixtureDetailHtml,
-        visibleText: fixtureDetailVisibleText,
+        html: this.detailHtml,
+        visibleText: this.detailVisibleText,
         source: "http"
       };
     }
@@ -48,7 +55,7 @@ describe("inventory cache", () => {
     const config: AppConfig = testConfig();
     const store = new SearchStore(config.databasePath);
     const fetcher = new InventoryFakeFetcher();
-    const service = new PorscheSearchService(fetcher, store, config.cacheTtlMs);
+    const service = new PorscheSearchService(fetcher, store, config.cacheTtlMs, config.carStatusCacheTtlMs);
 
     try {
       const searchA = store.create({
@@ -72,7 +79,7 @@ describe("inventory cache", () => {
       expect(firstA.listings[0].details?.includedOptions).toContain("GT Sport Steering Wheel");
       expect(fetcher.detailCalls).toBe(1);
 
-      await service.run(searchB, { refresh: true });
+      await service.run(searchB);
       expect(fetcher.detailCalls).toBe(1);
 
       fetcher.searchAHtml = listingPage("$124,900");
@@ -81,7 +88,7 @@ describe("inventory cache", () => {
         delta: "-$5,000",
         direction: "decrease"
       });
-      expect(fetcher.detailCalls).toBe(1);
+      expect(fetcher.detailCalls).toBe(2);
 
       fetcher.searchAHtml = emptyPage();
       const removedA = await service.run(searchA, { refresh: true });
@@ -92,6 +99,62 @@ describe("inventory cache", () => {
       const stillActiveB = await service.run(searchB, { refresh: true });
       expect(stillActiveB.listings).toHaveLength(1);
       expect(stillActiveB.removedListings).toHaveLength(0);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("favorites cars and keeps last seen price when a status refresh finds unavailable", async () => {
+    const config: AppConfig = testConfig();
+    const store = new SearchStore(config.databasePath);
+    const fetcher = new InventoryFakeFetcher();
+    const service = new PorscheSearchService(fetcher, store, config.cacheTtlMs, 0);
+
+    try {
+      const search = store.create({
+        name: "Search",
+        categories: ["911-carrera-s-coupe"],
+        maximumMileage: 30_000,
+        defaultLimit: 10,
+        maxPages: 1
+      });
+
+      const first = await service.run(search, { refresh: true });
+      const car = first.listings[0];
+      expect(car.price).toBe("$129,900");
+
+      const favorited = await service.favoriteCar({ vin: "WP0AB2A99NS123456" });
+      expect(favorited[0].isFavorite).toBe(true);
+      expect(service.listFavorites()).toHaveLength(1);
+
+      fetcher.detailHtml = fixtureUnavailableDetailHtml;
+      fetcher.detailVisibleText = fixtureUnavailableDetailVisibleText;
+      const unavailable = await service.run(search);
+
+      expect(unavailable.listings[0].status).toBe("unavailable");
+      expect(unavailable.listings[0].isFavorite).toBe(true);
+      expect(unavailable.listings[0].price).toBe("$129,900");
+      expect(unavailable.listings[0].details?.includedOptions).toContain("GT Sport Steering Wheel");
+      expect(service.listInventoryChanges()).toContain("active -> unavailable");
+
+      const unfavorited = await service.unfavoriteCar({ carId: car.id });
+      expect(unfavorited[0].isFavorite).toBe(false);
+      expect(service.listFavorites()).toHaveLength(0);
+
+      const oldUnavailableAt = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
+      store.updateCarStatus(car.id, {
+        detailUrl,
+        status: "active",
+        checkedAt: oldUnavailableAt
+      });
+      store.updateCarStatus(car.id, {
+        detailUrl,
+        status: "unavailable",
+        checkedAt: oldUnavailableAt
+      });
+      fetcher.searchAHtml = emptyPage();
+      const staleUnavailable = await service.run(search, { refresh: true });
+      expect(staleUnavailable.removedListings).toHaveLength(0);
     } finally {
       store.close();
     }

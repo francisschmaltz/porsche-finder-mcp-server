@@ -1,4 +1,4 @@
-import type { CarDetailData } from "../types.js";
+import type { CarDetailData, CarStatusData } from "../types.js";
 import { htmlToVisibleText } from "./parser.js";
 import { detectFeatureMatches } from "./features.js";
 
@@ -37,15 +37,40 @@ export function parsePorscheDetails(input: {
   const equipmentHighlights = collectSection(lines, "Equipment Highlights", ["Included Options", "Standard Equipment"]);
   const includedOptions = collectIncludedOptions(lines);
   const addedFeatureLines = unique([...equipmentHighlights, ...includedOptions]);
+  const fetchedAt = input.fetchedAt ?? new Date().toISOString();
+  const status = parsePorscheStatus({
+    html: input.html,
+    visibleText: lines.join("\n"),
+    detailUrl: input.detailUrl,
+    checkedAt: fetchedAt
+  });
 
   return {
     detailUrl: input.detailUrl,
     vin: findLabeledValue(lines, "VIN"),
     stockNumber: findLabeledValue(lines, "Stock Number"),
+    status: status.status,
+    price: status.price,
     equipmentHighlights,
     includedOptions,
     featureMatches: detectFeatureMatches(addedFeatureLines),
-    fetchedAt: input.fetchedAt ?? new Date().toISOString()
+    fetchedAt
+  };
+}
+
+export function parsePorscheStatus(input: {
+  html: string;
+  visibleText?: string;
+  detailUrl: string;
+  checkedAt?: string;
+}): CarStatusData {
+  const lines = splitVisibleLines(input.visibleText ?? htmlToVisibleText(input.html));
+
+  return {
+    detailUrl: input.detailUrl,
+    status: isUnavailable(lines) ? "unavailable" : "active",
+    price: findPrice(lines),
+    checkedAt: input.checkedAt ?? new Date().toISOString()
   };
 }
 
@@ -133,6 +158,25 @@ function isUsefulOptionLine(line: string): boolean {
 
 function cleanLine(value: string): string {
   return value.replace(/\s+/g, " ").trim();
+}
+
+function isUnavailable(lines: string[]): boolean {
+  return lines.some((line) => {
+    return /^(sold|unavailable|not available|no longer available)$/i.test(line) ||
+      /vehicle (?:is )?(?:sold|unavailable|not available|no longer available)/i.test(line) ||
+      /this (?:vehicle|car) (?:is )?(?:sold|unavailable|not available|no longer available)/i.test(line);
+  });
+}
+
+function findPrice(lines: string[]): string | undefined {
+  for (const line of lines) {
+    const match = line.match(/\$[\d,]+(?:\.\d{2})?/);
+    if (match) {
+      return match[0];
+    }
+  }
+
+  return undefined;
 }
 
 function unique(values: string[]): string[] {

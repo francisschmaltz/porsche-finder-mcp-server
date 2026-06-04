@@ -12,7 +12,7 @@ import { PorscheSearchService } from "./porsche/search.js";
 import { formatSearchRun } from "./porsche/format.js";
 import { buildPorscheSearchUrl, buildSearchSummary } from "./porsche/url.js";
 import { toToolName } from "./slug.js";
-import { idParamSchema, previewInputSchema, savedSearchInputSchema } from "./validation.js";
+import { carLocatorSchema, idParamSchema, previewInputSchema, savedSearchInputSchema } from "./validation.js";
 import type { SavedSearch } from "./types.js";
 
 export type AppHandle = {
@@ -31,7 +31,7 @@ export function createApp(config: AppConfig, options: CreateAppOptions = {}): Ap
   const app = createMcpExpressApp({ host: config.host });
   const store = new SearchStore(config.databasePath);
   const fetcher = options.fetcher ?? new HybridPorscheFetcher(config);
-  const searchService = new PorscheSearchService(fetcher, store, config.cacheTtlMs);
+  const searchService = new PorscheSearchService(fetcher, store, config.cacheTtlMs, config.carStatusCacheTtlMs);
   const mcpSessions = new PorscheMcpSessionManager(store, searchService);
   const requireAuth = requireBearerAuth(config.authToken);
 
@@ -70,6 +70,10 @@ export function createApp(config: AppConfig, options: CreateAppOptions = {}): Ap
 
   app.get("/api/searches", requireAuth, (_req, res) => {
     res.json({ searches: store.list().map(presentSearch) });
+  });
+
+  app.get("/api/overview", requireAuth, (_req, res) => {
+    res.json(store.getOverview());
   });
 
   app.post(
@@ -142,7 +146,8 @@ export function createApp(config: AppConfig, options: CreateAppOptions = {}): Ap
       const result = await searchService.run(ephemeral, {
         limit: input.limit,
         pages: input.pages,
-        refresh: input.refresh
+        refresh: input.refresh,
+        runType: "preview"
       });
 
       res.json({
@@ -150,6 +155,54 @@ export function createApp(config: AppConfig, options: CreateAppOptions = {}): Ap
         listings: result.listings,
         url: result.url
       });
+    })
+  );
+
+  app.post(
+    "/api/searches/:id/run",
+    requireAuth,
+    asyncRoute(async (req, res) => {
+      const { id } = idParamSchema.parse(req.params);
+      const search = store.getById(id);
+      if (!search) {
+        res.status(404).json({ error: "Saved search not found." });
+        return;
+      }
+
+      const result = await searchService.run(search, {
+        refresh: req.body?.refresh === true
+      });
+
+      res.json({
+        text: formatSearchRun(result),
+        listings: result.listings,
+        removedListings: result.removedListings,
+        url: result.url
+      });
+    })
+  );
+
+  app.get("/api/cars/favorites", requireAuth, (_req, res) => {
+    res.json({ favorites: searchService.listFavorites() });
+  });
+
+  app.post(
+    "/api/cars/favorite",
+    requireAuth,
+    asyncRoute(async (req, res) => {
+      const locator = carLocatorSchema.parse(req.body);
+      const matches = await searchService.favoriteCar(locator);
+      respondWithLocatorMatches(res, matches, "favorite");
+    })
+  );
+
+  app.post(
+    "/api/cars/unfavorite",
+    requireAuth,
+    asyncRoute(async (req, res) => {
+      const locator = carLocatorSchema.parse(req.body);
+      const matches = await searchService.unfavoriteCar(locator);
+      respondWithLocatorMatches(res, matches, "unfavorite");
     })
   );
 
@@ -192,4 +245,18 @@ function asyncRoute(handler: (req: Request, res: Response) => Promise<void>) {
   return (req: Request, res: Response, next: (error?: unknown) => void) => {
     handler(req, res).catch(next);
   };
+}
+
+function respondWithLocatorMatches(res: Response, matches: ReturnType<PorscheSearchService["listFavorites"]>, action: string): void {
+  if (matches.length === 0) {
+    res.status(404).json({ error: `No cached car matched that identifier. Run a search first, then ${action} it.` });
+    return;
+  }
+
+  if (matches.length > 1) {
+    res.status(409).json({ error: "Multiple cached cars matched. Use carId.", candidates: matches });
+    return;
+  }
+
+  res.json({ car: matches[0] });
 }

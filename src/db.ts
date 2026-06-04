@@ -2,13 +2,19 @@ import Database from "better-sqlite3";
 import { dirname } from "node:path";
 import { mkdirSync } from "node:fs";
 import type {
+  CarAvailabilityStatus,
   CachedCar,
   CarDetailData,
   CarListing,
+  CarStatusData,
+  FetchSource,
+  OverviewData,
   PriceChange,
   RemovedSearchCar,
   SavedSearch,
   SavedSearchInput,
+  SearchRunHistory,
+  SearchRunType,
   SearchFilters
 } from "./types.js";
 import { assertValidSlug, slugify } from "./slug.js";
@@ -45,7 +51,11 @@ type CarRow = {
   detail_url: string;
   first_seen_at: string;
   last_seen_at: string;
-  status: "active" | "sold" | "unavailable";
+  status: CarAvailabilityStatus;
+  is_favorite: 0 | 1;
+  favorited_at: string | null;
+  unavailable_at: string | null;
+  status_checked_at: string | null;
 };
 
 type DetailRow = {
@@ -68,6 +78,14 @@ type PriceHistoryRow = {
   seen_at: string;
 };
 
+type StatusHistoryRow = {
+  id: number;
+  car_id: number;
+  previous_status: CarAvailabilityStatus | null;
+  current_status: CarAvailabilityStatus;
+  checked_at: string;
+};
+
 type SearchCarRow = {
   search_id: number;
   car_id: number;
@@ -78,9 +96,57 @@ type SearchCarRow = {
   last_seen_price_cents: number | null;
 };
 
+type SearchRunRow = {
+  id: number;
+  run_type: SearchRunType;
+  search_id: number | null;
+  search_name: string;
+  search_slug: string;
+  started_at: string;
+  finished_at: string;
+  success: 0 | 1;
+  duration_ms: number;
+  pages_fetched: number;
+  listings_count: number;
+  removed_count: number;
+  sources_json: string;
+  cache_hits: number;
+  cache_misses: number;
+  http_pulls: number;
+  playwright_pulls: number;
+  error: string | null;
+};
+
 export type InventoryUpsertResult = {
   car: CachedCar;
   priceChanged: boolean;
+};
+
+export type CarLocator = {
+  carId?: number;
+  vin?: string;
+  stockNumber?: string;
+  detailUrl?: string;
+};
+
+export type SearchRunRecordInput = {
+  runType: SearchRunType;
+  searchId?: number;
+  searchName: string;
+  searchSlug: string;
+  startedAt: string;
+  finishedAt: string;
+  success: boolean;
+  durationMs: number;
+  pagesFetched: number;
+  listingsCount: number;
+  removedCount: number;
+  sources: FetchSource[];
+  cacheHits: number;
+  cacheMisses: number;
+  httpPulls: number;
+  playwrightPulls: number;
+  error?: string;
 };
 
 export class SearchStore {
@@ -236,8 +302,10 @@ export class SearchStore {
             detail_url,
             first_seen_at,
             last_seen_at,
-            status
-          ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`
+            status,
+            unavailable_at,
+            status_checked_at
+          ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', null, null)`
         )
         .run(
           buildIdentityKey({ detailUrl: listing.link }),
@@ -265,6 +333,9 @@ export class SearchStore {
       priceChanged = true;
       this.insertPriceHistory(existing.id, searchId, listing.price, priceCents, seenAt);
     }
+    if (existing.status !== "active") {
+      this.insertStatusHistory(existing.id, existing.status, "active", seenAt);
+    }
 
     this.db
       .prepare(
@@ -279,7 +350,8 @@ export class SearchStore {
               location = ?,
               detail_url = ?,
               last_seen_at = ?,
-              status = 'active'
+              status = 'active',
+              unavailable_at = null
         where id = ?`
       )
       .run(
@@ -360,7 +432,54 @@ export class SearchStore {
         details.fetchedAt
       );
 
-    return this.getCachedCarById(targetId)!;
+    return this.updateCarStatus(targetId, {
+      detailUrl: details.detailUrl,
+      status: details.status,
+      price: details.price,
+      checkedAt: details.fetchedAt
+    });
+  }
+
+  updateCarStatus(carId: number, status: CarStatusData, searchId: number | null = null): CachedCar {
+    const existing = this.getCarRowById(carId);
+    if (!existing) {
+      throw new Error(`Car not found: ${carId}`);
+    }
+
+    const shouldApplyStatusPrice = searchId === null;
+    const price = shouldApplyStatusPrice ? status.price : undefined;
+    const priceCents = price ? parsePriceCents(price) : undefined;
+    if (price && priceCents !== undefined && existing.price_cents !== priceCents) {
+      this.insertPriceHistory(carId, searchId, price, priceCents, status.checkedAt);
+    }
+
+    if (existing.status !== status.status) {
+      this.insertStatusHistory(carId, existing.status, status.status, status.checkedAt);
+    }
+
+    this.db
+      .prepare(
+        `update cars
+          set status = ?,
+              price = coalesce(?, price),
+              price_cents = coalesce(?, price_cents),
+              detail_url = ?,
+              unavailable_at = case when ? = 'unavailable' then coalesce(unavailable_at, ?) else null end,
+              status_checked_at = ?
+        where id = ?`
+      )
+      .run(
+        status.status,
+        price ?? null,
+        priceCents ?? null,
+        normalizeUrl(status.detailUrl),
+        status.status,
+        status.checkedAt,
+        status.checkedAt,
+        carId
+      );
+
+    return this.getCachedCarById(carId)!;
   }
 
   getCachedCarById(id: number): CachedCar | undefined {
@@ -368,7 +487,7 @@ export class SearchStore {
     return row ? this.mapCarRow(row) : undefined;
   }
 
-  findCachedCars(locator: { carId?: number; vin?: string; stockNumber?: string; detailUrl?: string }): CachedCar[] {
+  findCachedCars(locator: CarLocator): CachedCar[] {
     if (locator.carId) {
       const car = this.getCachedCarById(locator.carId);
       return car ? [car] : [];
@@ -396,6 +515,31 @@ export class SearchStore {
     const rows = this.db
       .prepare(`select * from cars where ${clauses.join(" or ")} order by last_seen_at desc`)
       .all(...values) as CarRow[];
+    return rows.map((row) => this.mapCarRow(row));
+  }
+
+  setFavorite(carId: number, favorite: boolean, changedAt: string): CachedCar {
+    const existing = this.getCarRowById(carId);
+    if (!existing) {
+      throw new Error(`Car not found: ${carId}`);
+    }
+
+    this.db
+      .prepare(
+        `update cars
+          set is_favorite = ?,
+              favorited_at = ?
+        where id = ?`
+      )
+      .run(favorite ? 1 : 0, favorite ? changedAt : null, carId);
+
+    return this.getCachedCarById(carId)!;
+  }
+
+  listFavorites(): CachedCar[] {
+    const rows = this.db
+      .prepare("select * from cars where is_favorite = 1 order by favorited_at desc, last_seen_at desc")
+      .all() as CarRow[];
     return rows.map((row) => this.mapCarRow(row));
   }
 
@@ -478,6 +622,18 @@ export class SearchStore {
       SearchCarRow & { search_name: string; title: string; vin: string | null; stock_number: string | null; detail_url: string }
     >;
 
+    const statusRows = this.db
+      .prepare(
+        `select sh.*, c.title, c.vin, c.stock_number, c.detail_url
+          from car_status_history sh
+          join cars c on c.id = sh.car_id
+          order by sh.checked_at desc, sh.id desc
+          limit ?`
+      )
+      .all(limit) as Array<
+      StatusHistoryRow & { title: string; vin: string | null; stock_number: string | null; detail_url: string }
+    >;
+
     const priceText =
       priceRows.length === 0
         ? "No price history yet."
@@ -501,7 +657,134 @@ export class SearchStore {
             })
             .join("\n");
 
-    return [`Recent price history`, priceText, ``, `Recent search removals`, removedText].join("\n");
+    const statusText =
+      statusRows.length === 0
+        ? "No availability changes yet."
+        : statusRows
+            .map((row) => {
+              const previous = row.previous_status ?? "unknown";
+              return `${row.checked_at}: ${row.title} ${previous} -> ${row.current_status} ${identityLabel(row)}`;
+            })
+            .join("\n");
+
+    return [
+      `Recent price history`,
+      priceText,
+      ``,
+      `Recent availability changes`,
+      statusText,
+      ``,
+      `Recent search removals`,
+      removedText
+    ].join("\n");
+  }
+
+  recordSearchRun(input: SearchRunRecordInput): SearchRunHistory {
+    const result = this.db
+      .prepare(
+        `insert into search_runs (
+          run_type,
+          search_id,
+          search_name,
+          search_slug,
+          started_at,
+          finished_at,
+          success,
+          duration_ms,
+          pages_fetched,
+          listings_count,
+          removed_count,
+          sources_json,
+          cache_hits,
+          cache_misses,
+          http_pulls,
+          playwright_pulls,
+          error
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        input.runType,
+        input.searchId ?? null,
+        input.searchName,
+        input.searchSlug,
+        input.startedAt,
+        input.finishedAt,
+        input.success ? 1 : 0,
+        input.durationMs,
+        input.pagesFetched,
+        input.listingsCount,
+        input.removedCount,
+        JSON.stringify(input.sources),
+        input.cacheHits,
+        input.cacheMisses,
+        input.httpPulls,
+        input.playwrightPulls,
+        input.error ?? null
+      );
+
+    return this.getSearchRunById(Number(result.lastInsertRowid))!;
+  }
+
+  listRecentRuns(limit = 8): SearchRunHistory[] {
+    const rows = this.db
+      .prepare("select * from search_runs order by finished_at desc, id desc limit ?")
+      .all(limit) as SearchRunRow[];
+    return rows.map(mapRunRow);
+  }
+
+  getOverview(favoritesPreviewLimit = 3, recentRunLimit = 8): OverviewData {
+    const statsRow = this.db
+      .prepare(
+        `select
+          (select count(*) from search_tools) as saved_searches,
+          (select count(*) from search_tools where enabled = 1) as enabled_searches,
+          (select count(*) from cars) as cached_cars,
+          (select count(*) from cars where is_favorite = 1) as favorite_cars,
+          (select count(*) from cars where status = 'unavailable') as unavailable_cars,
+          (select count(*) from cars where status = 'unavailable' and is_favorite = 1) as unavailable_favorites,
+          (select count(*) from search_runs) as total_runs,
+          (select count(*) from search_runs where success = 0) as failed_runs,
+          coalesce((select sum(cache_hits) from search_runs), 0) as cache_hits,
+          coalesce((select sum(cache_misses) from search_runs), 0) as cache_misses,
+          coalesce((select sum(http_pulls) from search_runs), 0) as http_pulls,
+          coalesce((select sum(playwright_pulls) from search_runs), 0) as playwright_pulls,
+          (select finished_at from search_runs order by finished_at desc, id desc limit 1) as last_run_at`
+      )
+      .get() as {
+      saved_searches: number;
+      enabled_searches: number;
+      cached_cars: number;
+      favorite_cars: number;
+      unavailable_cars: number;
+      unavailable_favorites: number;
+      total_runs: number;
+      failed_runs: number;
+      cache_hits: number;
+      cache_misses: number;
+      http_pulls: number;
+      playwright_pulls: number;
+      last_run_at: string | null;
+    };
+
+    return {
+      stats: {
+        savedSearches: statsRow.saved_searches,
+        enabledSearches: statsRow.enabled_searches,
+        cachedCars: statsRow.cached_cars,
+        favoriteCars: statsRow.favorite_cars,
+        unavailableCars: statsRow.unavailable_cars,
+        unavailableFavorites: statsRow.unavailable_favorites,
+        totalRuns: statsRow.total_runs,
+        failedRuns: statsRow.failed_runs,
+        cacheHits: statsRow.cache_hits,
+        cacheMisses: statsRow.cache_misses,
+        httpPulls: statsRow.http_pulls,
+        playwrightPulls: statsRow.playwright_pulls,
+        lastRunAt: statsRow.last_run_at ?? undefined
+      },
+      recentRuns: this.listRecentRuns(recentRunLimit),
+      favoritesPreview: this.listFavorites().slice(0, favoritesPreviewLimit)
+    };
   }
 
   private migrate(): void {
@@ -541,7 +824,11 @@ export class SearchStore {
         detail_url text not null,
         first_seen_at text not null,
         last_seen_at text not null,
-        status text not null default 'active'
+        status text not null default 'active',
+        is_favorite integer not null default 0,
+        favorited_at text,
+        unavailable_at text,
+        status_checked_at text
       );
 
       create unique index if not exists idx_cars_vin
@@ -565,6 +852,17 @@ export class SearchStore {
 
       create index if not exists idx_car_price_history_car
         on car_price_history(car_id, seen_at);
+
+      create table if not exists car_status_history (
+        id integer primary key autoincrement,
+        car_id integer not null references cars(id) on delete cascade,
+        previous_status text,
+        current_status text not null,
+        checked_at text not null
+      );
+
+      create index if not exists idx_car_status_history_car
+        on car_status_history(car_id, checked_at);
 
       create table if not exists car_details (
         car_id integer primary key references cars(id) on delete cascade,
@@ -590,13 +888,57 @@ export class SearchStore {
 
       create index if not exists idx_saved_search_cars_active
         on saved_search_cars(search_id, active);
+
+      create table if not exists search_runs (
+        id integer primary key autoincrement,
+        run_type text not null,
+        search_id integer,
+        search_name text not null,
+        search_slug text not null,
+        started_at text not null,
+        finished_at text not null,
+        success integer not null,
+        duration_ms integer not null,
+        pages_fetched integer not null default 0,
+        listings_count integer not null default 0,
+        removed_count integer not null default 0,
+        sources_json text not null default '[]',
+        cache_hits integer not null default 0,
+        cache_misses integer not null default 0,
+        http_pulls integer not null default 0,
+        playwright_pulls integer not null default 0,
+        error text
+      );
+
+      create index if not exists idx_search_runs_finished
+        on search_runs(finished_at);
     `);
 
-    const columns = this.db.prepare("pragma table_info(search_tools)").all() as Array<{ name: string }>;
-    const columnNames = new Set(columns.map((column) => column.name));
-    if (!columnNames.has("maximum_mileage")) {
+    const searchColumns = this.db.prepare("pragma table_info(search_tools)").all() as Array<{ name: string }>;
+    const searchColumnNames = new Set(searchColumns.map((column) => column.name));
+    if (!searchColumnNames.has("maximum_mileage")) {
       this.db.exec("alter table search_tools add column maximum_mileage integer not null default 30000");
     }
+
+    const carColumns = this.db.prepare("pragma table_info(cars)").all() as Array<{ name: string }>;
+    const carColumnNames = new Set(carColumns.map((column) => column.name));
+    if (!carColumnNames.has("is_favorite")) {
+      this.db.exec("alter table cars add column is_favorite integer not null default 0");
+    }
+    if (!carColumnNames.has("favorited_at")) {
+      this.db.exec("alter table cars add column favorited_at text");
+    }
+    if (!carColumnNames.has("unavailable_at")) {
+      this.db.exec("alter table cars add column unavailable_at text");
+    }
+    if (!carColumnNames.has("status_checked_at")) {
+      this.db.exec("alter table cars add column status_checked_at text");
+    }
+
+    this.db.exec(`
+      create index if not exists idx_cars_favorite
+        on cars(is_favorite, favorited_at);
+    `);
   }
 
   private prepareSlug(name: string, explicitSlug?: string): string {
@@ -604,6 +946,11 @@ export class SearchStore {
     assertValidSlug(base);
     this.assertSlugAvailable(base);
     return base;
+  }
+
+  private getSearchRunById(id: number): SearchRunHistory | undefined {
+    const row = this.db.prepare("select * from search_runs where id = ?").get(id) as SearchRunRow | undefined;
+    return row ? mapRunRow(row) : undefined;
   }
 
   private assertSlugAvailable(slug: string, currentId?: number): void {
@@ -664,6 +1011,10 @@ export class SearchStore {
       firstSeenAt: row.first_seen_at,
       lastSeenAt: row.last_seen_at,
       status: row.status,
+      isFavorite: row.is_favorite === 1,
+      favoritedAt: row.favorited_at ?? undefined,
+      unavailableAt: row.unavailable_at ?? undefined,
+      statusCheckedAt: row.status_checked_at ?? undefined,
       details: this.getCachedCarDetails(row.id),
       priceChange: this.getLatestPriceChange(row.id)
     };
@@ -702,6 +1053,24 @@ export class SearchStore {
         ) values (?, ?, ?, ?, ?)`
       )
       .run(carId, searchId, price, priceCents, seenAt);
+  }
+
+  private insertStatusHistory(
+    carId: number,
+    previousStatus: CarAvailabilityStatus | null,
+    currentStatus: CarAvailabilityStatus,
+    checkedAt: string
+  ): void {
+    this.db
+      .prepare(
+        `insert into car_status_history (
+          car_id,
+          previous_status,
+          current_status,
+          checked_at
+        ) values (?, ?, ?, ?)`
+      )
+      .run(carId, previousStatus, currentStatus, checkedAt);
   }
 
   private getLatestPriceChange(carId: number): PriceChange | undefined {
@@ -745,6 +1114,17 @@ export class SearchStore {
       )
       .run(targetId, sourceId);
     this.db.prepare("update car_price_history set car_id = ? where car_id = ?").run(targetId, sourceId);
+    this.db.prepare("update car_status_history set car_id = ? where car_id = ?").run(targetId, sourceId);
+    this.db
+      .prepare(
+        `update cars
+          set is_favorite = max(is_favorite, (select is_favorite from cars where id = ?)),
+              favorited_at = coalesce(favorited_at, (select favorited_at from cars where id = ?)),
+              unavailable_at = coalesce(unavailable_at, (select unavailable_at from cars where id = ?)),
+              status_checked_at = coalesce(status_checked_at, (select status_checked_at from cars where id = ?))
+        where id = ?`
+      )
+      .run(sourceId, sourceId, sourceId, sourceId, targetId);
     this.db.prepare("delete from saved_search_cars where car_id = ?").run(sourceId);
     this.db.prepare("delete from car_details where car_id = ?").run(sourceId);
     this.db.prepare("delete from cars where id = ?").run(sourceId);
@@ -786,10 +1166,34 @@ function mapDetailRow(row: DetailRow): CarDetailData {
     detailUrl: row.detail_url,
     vin: row.vin ?? undefined,
     stockNumber: row.stock_number ?? undefined,
+    status: "active",
     equipmentHighlights: JSON.parse(row.equipment_highlights_json) as string[],
     includedOptions: JSON.parse(row.included_options_json) as string[],
     featureMatches: JSON.parse(row.feature_matches_json) as CarDetailData["featureMatches"],
     fetchedAt: row.fetched_at
+  };
+}
+
+function mapRunRow(row: SearchRunRow): SearchRunHistory {
+  return {
+    id: row.id,
+    runType: row.run_type,
+    searchId: row.search_id ?? undefined,
+    searchName: row.search_name,
+    searchSlug: row.search_slug,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
+    success: row.success === 1,
+    durationMs: row.duration_ms,
+    pagesFetched: row.pages_fetched,
+    listingsCount: row.listings_count,
+    removedCount: row.removed_count,
+    sources: JSON.parse(row.sources_json) as FetchSource[],
+    cacheHits: row.cache_hits,
+    cacheMisses: row.cache_misses,
+    httpPulls: row.http_pulls,
+    playwrightPulls: row.playwright_pulls,
+    error: row.error ?? undefined
   };
 }
 

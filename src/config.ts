@@ -8,6 +8,7 @@ export type AppConfig = {
   authToken: string;
   databasePath: string;
   cacheTtlMs: number;
+  carStatusCacheTtlMs: number;
   playwrightBrowser: PlaywrightBrowserName;
   playwrightProfileDir: string;
   playwrightExecutablePath?: string;
@@ -53,7 +54,8 @@ export function loadConfig(): AppConfig {
     host: process.env.HOST ?? "127.0.0.1",
     authToken: process.env.AUTH_TOKEN ?? "change-me",
     databasePath: process.env.DATABASE_PATH ?? "./data/porsche-finder.sqlite",
-    cacheTtlMs: readNumber("CACHE_TTL_SECONDS", 300) * 1000,
+    cacheTtlMs: readNumber("CACHE_TTL_SECONDS", 900) * 1000,
+    carStatusCacheTtlMs: readNumber("CAR_STATUS_CACHE_TTL_SECONDS", 86_400) * 1000,
     playwrightBrowser: readPlaywrightBrowser(),
     playwrightProfileDir: process.env.PLAYWRIGHT_PROFILE_DIR ?? "./data/playwright-profile",
     playwrightExecutablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH,

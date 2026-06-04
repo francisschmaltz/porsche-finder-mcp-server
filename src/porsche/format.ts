@@ -26,6 +26,9 @@ export function formatCachedCar(car: CachedCar, index?: number): string {
     `   Cache ID: ${car.id || "preview"}`,
     car.vin ? `   VIN: ${car.vin}` : undefined,
     car.stockNumber ? `   Stock: ${car.stockNumber}` : undefined,
+    `   Favorite: ${car.isFavorite ? "yes" : "no"}`,
+    `   Status: ${car.status}`,
+    car.unavailableAt ? `   Unavailable since: ${car.unavailableAt}` : undefined,
     `   Color: ${car.color.exterior} / ${car.color.interior}`,
     `   Mileage: ${car.mileage}`,
     `   Price: ${car.price}`,
@@ -54,6 +57,14 @@ export function formatCachedCar(car: CachedCar, index?: number): string {
   }
 
   return detailLines.join("\n");
+}
+
+export function formatFavorites(cars: CachedCar[]): string {
+  if (cars.length === 0) {
+    return "No favorite cars yet.";
+  }
+
+  return ["Favorite cars", ...cars.map((car, index) => formatCachedCar(car, index + 1))].join("\n\n");
 }
 
 export function formatAddedFeatures(car: CachedCar): string {

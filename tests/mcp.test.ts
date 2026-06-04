@@ -73,6 +73,9 @@ describe("MCP endpoint", () => {
       expect(toolNames).toContain("list_porsche_search_tools");
       expect(toolNames).toContain("get_porsche_car_added_features");
       expect(toolNames).toContain("list_porsche_inventory_changes");
+      expect(toolNames).toContain("favorite_car");
+      expect(toolNames).toContain("unfavorite_car");
+      expect(toolNames).toContain("list_favorites");
       expect(toolNames).toContain("porsche_911_carrera_coupes");
 
       const called = await request(handle.app)
@@ -96,8 +99,45 @@ describe("MCP endpoint", () => {
 
       expect(called.body.result.content[0].text).toContain("2022 Porsche 911 Carrera 4S Coupe");
       expect(called.body.result.content[0].text).toContain("VIN: WP0AB2A99NS123456");
+      expect(called.body.result.content[0].text).toContain("Favorite: no");
+      expect(called.body.result.content[0].text).toContain("Status: active");
       expect(called.body.result.content[0].text).toContain("GT Sport Steering Wheel");
       expect(called.body.result.content[0].text).toContain("Link: https://finder.porsche.com");
+
+      const favorite = await request(handle.app)
+        .post("/mcp/v1")
+        .set(mcpHeaders)
+        .set("mcp-session-id", sessionId)
+        .send({
+          jsonrpc: "2.0",
+          id: 4,
+          method: "tools/call",
+          params: {
+            name: "favorite_car",
+            arguments: {
+              vin: "WP0AB2A99NS123456"
+            }
+          }
+        })
+        .expect(200);
+      expect(favorite.body.result.content[0].text).toContain("Favorited");
+
+      const favorites = await request(handle.app)
+        .post("/mcp/v1")
+        .set(mcpHeaders)
+        .set("mcp-session-id", sessionId)
+        .send({
+          jsonrpc: "2.0",
+          id: 5,
+          method: "tools/call",
+          params: {
+            name: "list_favorites",
+            arguments: {}
+          }
+        })
+        .expect(200);
+      expect(favorites.body.result.content[0].text).toContain("Favorite cars");
+      expect(favorites.body.result.content[0].text).toContain("Favorite: yes");
 
       const features = await request(handle.app)
         .post("/mcp/v1")
@@ -105,7 +145,7 @@ describe("MCP endpoint", () => {
         .set("mcp-session-id", sessionId)
         .send({
           jsonrpc: "2.0",
-          id: 4,
+          id: 6,
           method: "tools/call",
           params: {
             name: "get_porsche_car_added_features",
@@ -120,13 +160,31 @@ describe("MCP endpoint", () => {
       expect(features.body.result.content[0].text).toContain("BOSE Surround Sound System");
       expect(features.body.result.content[0].text).not.toContain("Standard Sound Package");
 
+      const unfavorite = await request(handle.app)
+        .post("/mcp/v1")
+        .set(mcpHeaders)
+        .set("mcp-session-id", sessionId)
+        .send({
+          jsonrpc: "2.0",
+          id: 7,
+          method: "tools/call",
+          params: {
+            name: "unfavorite_car",
+            arguments: {
+              vin: "WP0AB2A99NS123456"
+            }
+          }
+        })
+        .expect(200);
+      expect(unfavorite.body.result.content[0].text).toContain("Unfavorited");
+
       const changes = await request(handle.app)
         .post("/mcp/v1")
         .set(mcpHeaders)
         .set("mcp-session-id", sessionId)
         .send({
           jsonrpc: "2.0",
-          id: 5,
+          id: 8,
           method: "tools/call",
           params: {
             name: "list_porsche_inventory_changes",
