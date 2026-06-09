@@ -3,7 +3,7 @@ import { SearchStore } from "../src/db.js";
 import { PorscheSearchService } from "../src/porsche/search.js";
 import type { AppConfig } from "../src/config.js";
 import type { FetchPageResult } from "../src/types.js";
-import type { PorschePageFetcher } from "../src/porsche/fetcher.js";
+import { PorscheNotFoundError, type PorschePageFetcher } from "../src/porsche/fetcher.js";
 import {
   fixtureDetailHtml,
   fixtureDetailVisibleText,
@@ -19,11 +19,16 @@ class InventoryFakeFetcher implements PorschePageFetcher {
   searchBHtml = listingPage("$129,900");
   detailHtml = fixtureDetailHtml;
   detailVisibleText = fixtureDetailVisibleText;
+  detailNotFound = false;
   detailCalls = 0;
 
   async fetchPage(url: string): Promise<FetchPageResult> {
     if (url.includes("/details/")) {
       this.detailCalls += 1;
+      if (this.detailNotFound) {
+        throw new PorscheNotFoundError("Porsche detail page does not exist (404).", "http");
+      }
+
       return {
         url,
         html: this.detailHtml,
@@ -155,6 +160,40 @@ describe("inventory cache", () => {
       fetcher.searchAHtml = emptyPage();
       const staleUnavailable = await service.run(search, { refresh: true });
       expect(staleUnavailable.removedListings).toHaveLength(0);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("marks a car unavailable only after the detail page is missing twice", async () => {
+    const config: AppConfig = testConfig();
+    const store = new SearchStore(config.databasePath);
+    const fetcher = new InventoryFakeFetcher();
+    const service = new PorscheSearchService(fetcher, store, config.cacheTtlMs, 0);
+
+    try {
+      const search = store.create({
+        name: "Search",
+        categories: ["911-carrera-s-coupe"],
+        maximumMileage: 30_000,
+        defaultLimit: 10,
+        maxPages: 1
+      });
+
+      const first = await service.run(search, { refresh: true });
+      expect(first.listings[0].status).toBe("active");
+
+      fetcher.detailNotFound = true;
+      const firstMissing = await service.run(search);
+      expect(firstMissing.listings[0].status).toBe("active");
+      expect(firstMissing.listings[0].detailNotFoundCount).toBe(1);
+      expect(firstMissing.listings[0].detailError).toContain("does not exist");
+
+      const secondMissing = await service.run(search);
+      expect(secondMissing.listings[0].status).toBe("unavailable");
+      expect(secondMissing.listings[0].detailNotFoundCount).toBe(2);
+      expect(secondMissing.listings[0].price).toBe("$129,900");
+      expect(service.listInventoryChanges()).toContain("active -> unavailable");
     } finally {
       store.close();
     }

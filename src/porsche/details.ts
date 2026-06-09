@@ -161,11 +161,7 @@ function cleanLine(value: string): string {
 }
 
 function isUnavailable(lines: string[]): boolean {
-  return lines.some((line) => {
-    return /^(sold|unavailable|not available|no longer available)$/i.test(line) ||
-      /vehicle (?:is )?(?:sold|unavailable|not available|no longer available)/i.test(line) ||
-      /this (?:vehicle|car) (?:is )?(?:sold|unavailable|not available|no longer available)/i.test(line);
-  });
+  return lines.some((line) => /This Porsche has been sold\./i.test(line));
 }
 
 function findPrice(lines: string[]): string | undefined {

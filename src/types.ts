@@ -99,6 +99,7 @@ export type CachedCar = {
   favoritedAt?: string;
   unavailableAt?: string;
   statusCheckedAt?: string;
+  detailNotFoundCount?: number;
   details?: CarDetailData;
   priceChange?: PriceChange;
   detailError?: string;

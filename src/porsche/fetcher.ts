@@ -20,6 +20,16 @@ export class PorscheFetchError extends Error {
   }
 }
 
+export class PorscheNotFoundError extends Error {
+  constructor(
+    message: string,
+    readonly source: FetchPageResult["source"]
+  ) {
+    super(message);
+    this.name = "PorscheNotFoundError";
+  }
+}
+
 export class HybridPorscheFetcher implements PorschePageFetcher {
   constructor(
     private config: Pick<
@@ -55,6 +65,10 @@ export class HybridPorscheFetcher implements PorschePageFetcher {
     });
     const html = await response.text();
 
+    if (response.status === 404 || response.status === 410) {
+      throw new PorscheNotFoundError(`Porsche detail page does not exist (${response.status}).`, "http");
+    }
+
     if (!response.ok || looksBlocked(html, response.status)) {
       throw new PorscheFetchError(`HTTP fetch blocked or failed with ${response.status}.`);
     }
@@ -85,7 +99,11 @@ export class HybridPorscheFetcher implements PorschePageFetcher {
 
     try {
       const page = await context.newPage();
-      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 });
+      const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 });
+      const status = response?.status();
+      if (status === 404 || status === 410) {
+        throw new PorscheNotFoundError(`Porsche detail page does not exist (${status}).`, "playwright");
+      }
       await this.waitThroughBrowserCheckpoint(page);
 
       const visibleText = await page.locator("body").innerText({ timeout: 15_000 });

@@ -8,7 +8,7 @@ import type {
   SearchRunResult
 } from "../types.js";
 import type { CarLocator, SearchStore } from "../db.js";
-import type { PorschePageFetcher } from "./fetcher.js";
+import { PorscheNotFoundError, type PorschePageFetcher } from "./fetcher.js";
 import { TimedCache } from "./cache.js";
 import { parsePorscheListings } from "./parser.js";
 import { parsePorscheDetails, parsePorscheStatus } from "./details.js";
@@ -114,10 +114,15 @@ export class PorscheSearchService {
               countPull(fetched.source);
               car = fetched.car;
             } catch (error) {
-              car = {
-                ...car,
-                detailError: error instanceof Error ? error.message : "Detail fetch failed."
-              };
+              if (error instanceof PorscheNotFoundError) {
+                countPull(error.source);
+                car = this.recordDetailPageNotFound(car, error);
+              } else {
+                car = {
+                  ...car,
+                  detailError: error instanceof Error ? error.message : "Detail fetch failed."
+                };
+              }
             }
             fetchedDetails = Boolean(car.details);
           }
@@ -128,10 +133,15 @@ export class PorscheSearchService {
               countPull(fetched.source);
               car = fetched.car;
             } catch (error) {
-              car = {
-                ...car,
-                detailError: error instanceof Error ? error.message : "Status refresh failed."
-              };
+              if (error instanceof PorscheNotFoundError) {
+                countPull(error.source);
+                car = this.recordDetailPageNotFound(car, error);
+              } else {
+                car = {
+                  ...car,
+                  detailError: error instanceof Error ? error.message : "Status refresh failed."
+                };
+              }
             }
           }
 
@@ -223,7 +233,14 @@ export class PorscheSearchService {
 
     const car = matches[0];
     if (!car.details || locator.refresh) {
-      return [await this.fetchAndCacheDetails(car)];
+      try {
+        return [await this.fetchAndCacheDetails(car)];
+      } catch (error) {
+        if (error instanceof PorscheNotFoundError) {
+          return [this.recordDetailPageNotFound(car, error)];
+        }
+        throw error;
+      }
     }
 
     return [car];
@@ -321,6 +338,13 @@ export class PorscheSearchService {
     return {
       car: this.store.updateCarStatus(car.id, status, searchId),
       source: fetched.source
+    };
+  }
+
+  private recordDetailPageNotFound(car: CachedCar, error: PorscheNotFoundError): CachedCar {
+    return {
+      ...this.store.recordDetailPageNotFound(car.id, car.link, new Date().toISOString()),
+      detailError: error.message
     };
   }
 

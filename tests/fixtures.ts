@@ -90,7 +90,7 @@ export const fixtureDetailHtml = `<!doctype html>
 
 export const fixtureUnavailableDetailVisibleText = [
   "2022 Porsche 911 Carrera 4S Coupe",
-  "This vehicle is no longer available",
+  "This Porsche has been sold.",
   "Porsche San Antonio",
   "Stock Number:",
   "NS123456",

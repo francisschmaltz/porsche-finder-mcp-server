@@ -56,6 +56,7 @@ type CarRow = {
   favorited_at: string | null;
   unavailable_at: string | null;
   status_checked_at: string | null;
+  detail_not_found_count: number;
 };
 
 type DetailRow = {
@@ -465,7 +466,8 @@ export class SearchStore {
               price_cents = coalesce(?, price_cents),
               detail_url = ?,
               unavailable_at = case when ? = 'unavailable' then coalesce(unavailable_at, ?) else null end,
-              status_checked_at = ?
+              status_checked_at = ?,
+              detail_not_found_count = 0
         where id = ?`
       )
       .run(
@@ -478,6 +480,33 @@ export class SearchStore {
         status.checkedAt,
         carId
       );
+
+    return this.getCachedCarById(carId)!;
+  }
+
+  recordDetailPageNotFound(carId: number, detailUrl: string, checkedAt: string): CachedCar {
+    const existing = this.getCarRowById(carId);
+    if (!existing) {
+      throw new Error(`Car not found: ${carId}`);
+    }
+
+    const count = existing.detail_not_found_count + 1;
+    const nextStatus: CarAvailabilityStatus = count >= 2 ? "unavailable" : existing.status;
+    if (existing.status !== nextStatus) {
+      this.insertStatusHistory(carId, existing.status, nextStatus, checkedAt);
+    }
+
+    this.db
+      .prepare(
+        `update cars
+          set detail_url = ?,
+              detail_not_found_count = ?,
+              status_checked_at = ?,
+              status = ?,
+              unavailable_at = case when ? = 'unavailable' then coalesce(unavailable_at, ?) else unavailable_at end
+        where id = ?`
+      )
+      .run(normalizeUrl(detailUrl), count, checkedAt, nextStatus, nextStatus, checkedAt, carId);
 
     return this.getCachedCarById(carId)!;
   }
@@ -828,7 +857,8 @@ export class SearchStore {
         is_favorite integer not null default 0,
         favorited_at text,
         unavailable_at text,
-        status_checked_at text
+        status_checked_at text,
+        detail_not_found_count integer not null default 0
       );
 
       create unique index if not exists idx_cars_vin
@@ -934,6 +964,9 @@ export class SearchStore {
     if (!carColumnNames.has("status_checked_at")) {
       this.db.exec("alter table cars add column status_checked_at text");
     }
+    if (!carColumnNames.has("detail_not_found_count")) {
+      this.db.exec("alter table cars add column detail_not_found_count integer not null default 0");
+    }
 
     this.db.exec(`
       create index if not exists idx_cars_favorite
@@ -1015,6 +1048,7 @@ export class SearchStore {
       favoritedAt: row.favorited_at ?? undefined,
       unavailableAt: row.unavailable_at ?? undefined,
       statusCheckedAt: row.status_checked_at ?? undefined,
+      detailNotFoundCount: row.detail_not_found_count,
       details: this.getCachedCarDetails(row.id),
       priceChange: this.getLatestPriceChange(row.id)
     };
@@ -1121,10 +1155,11 @@ export class SearchStore {
           set is_favorite = max(is_favorite, (select is_favorite from cars where id = ?)),
               favorited_at = coalesce(favorited_at, (select favorited_at from cars where id = ?)),
               unavailable_at = coalesce(unavailable_at, (select unavailable_at from cars where id = ?)),
-              status_checked_at = coalesce(status_checked_at, (select status_checked_at from cars where id = ?))
+              status_checked_at = coalesce(status_checked_at, (select status_checked_at from cars where id = ?)),
+              detail_not_found_count = max(detail_not_found_count, (select detail_not_found_count from cars where id = ?))
         where id = ?`
       )
-      .run(sourceId, sourceId, sourceId, sourceId, targetId);
+      .run(sourceId, sourceId, sourceId, sourceId, sourceId, targetId);
     this.db.prepare("delete from saved_search_cars where car_id = ?").run(sourceId);
     this.db.prepare("delete from car_details where car_id = ?").run(sourceId);
     this.db.prepare("delete from cars where id = ?").run(sourceId);

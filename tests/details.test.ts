@@ -53,4 +53,15 @@ describe("parsePorscheDetails", () => {
     expect(status.status).toBe("unavailable");
     expect(status.price).toBeUndefined();
   });
+
+  it("does not mark unavailable from generic availability copy", () => {
+    const status = parsePorscheStatus({
+      html: "<p>This vehicle is no longer available</p>",
+      visibleText: "This vehicle is no longer available",
+      detailUrl: "https://finder.porsche.com/us/en-US/details/porsche-911-carrera-4s-coupe-used-123",
+      checkedAt: "2026-06-03T12:00:00.000Z"
+    });
+
+    expect(status.status).toBe("active");
+  });
 });
